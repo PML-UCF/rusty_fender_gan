@@ -20,5 +20,10 @@ The repository consists of the following four folders:
 ### src:
 - utils is a set of functions used for the rust map application.
 - main is a back-to-back pipeline for our application, from the RLN and RTN predictions until the rust maps application in a car.
+- model contains our RLN and RTN generator and discriminator architectures.
+- data contains a function that wraps our dataset
 
-Once our manuscript is accept, the code will be updated with the latest models implementation.
+### weights:
+- this folder contain the trained weights of our RLN and RTN generator and discriminator models
+
+The file src/main.py is the executable file of this project.

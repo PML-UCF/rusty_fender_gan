@@ -42,11 +42,16 @@
 # SOFTWARE.
 # ==============================================================================
 import numpy as np
+import tensorflow as tf
 from PIL import Image, ImageEnhance
 from pathlib import Path
 
 from utils import get_fender_mask, load_image, get_pixel_map, apply_map
+from model import rusty_level_network_generator, rusty_texture_network_generator
+from data import get_data
 
+INPUT_CHANNELS = 4
+OUTPUT_CHANNELS = 1
 
 IMG_SIZE = 256
 RADIUS = (IMG_SIZE / 24) * 10
@@ -54,6 +59,8 @@ STEP_RADIUS = 1
 
 N_SAMPLE_MAPS = 48
 
+DS_PATH = '../ds/'
+WEIGHTS_PATH = '../weights/'
 TARGET_CARS_PATH = '../target-cars/'
 SAMPLES_PATH = '../samples/'
 SAMPLE_MAPS_PATH = SAMPLES_PATH + 'maps/'
@@ -67,9 +74,55 @@ annotation = annotation['annotation']
 Path(SAMPLE_MAPS_PATH).mkdir(parents=True, exist_ok=True)
 Path(SAMPLE_CARS_PATH).mkdir(parents=True, exist_ok=True)
 
+ds_level_maps, _ = get_data(DS_PATH)
+
+
+def generate_combinations(n):
+    noise_n = 8 * 512
+    noise_width = np.round(noise_n / (ds_level_maps.shape[1] * INPUT_CHANNELS)).astype(int)
+    idx = np.random.choice(len(ds_level_maps), (n, INPUT_CHANNELS), replace=True)
+    samples = np.zeros((n, ds_level_maps.shape[1], ds_level_maps.shape[2] + noise_width, INPUT_CHANNELS))
+    for i in range(n):
+        sample = np.zeros((ds_level_maps.shape[1], ds_level_maps.shape[2], INPUT_CHANNELS))
+        for j in range(INPUT_CHANNELS):
+            sample[:, :, j] = ds_level_maps[idx[i, j], :, :, 0]
+        samples[i, :, :ds_level_maps.shape[2], :] = sample
+    samples[:, :, ds_level_maps.shape[2]:, :] = tf.random.uniform((n, ds_level_maps.shape[1], noise_width, INPUT_CHANNELS))
+    return samples
+
+
+seed = generate_combinations(n=N_SAMPLE_MAPS)
+
+
+print('Creating models...')
+rln = rusty_level_network_generator(input_channels=INPUT_CHANNELS, output_channels=OUTPUT_CHANNELS)
+rtn = rusty_texture_network_generator()
+
+print('Loading weights...')
+weights = np.load(WEIGHTS_PATH + 'rln_generator_weights.npy', allow_pickle=True)
+rln.set_weights(weights)
+
+weights = np.load(WEIGHTS_PATH + 'rtn_generator_weights.npy', allow_pickle=True)
+rtn.set_weights(weights)
+
+print('Generating maps...')
+out_level = rln(seed, training=False)
+out_texture = rtn(out_level, training=False)
+
+samples_level = (np.array(out_level) + 1) / 2
+samples_level = np.concatenate([samples_level, samples_level, samples_level], -1)
+samples_texture = (np.array(out_texture) + 1) / 2
+
+print('Saving maps...')
+for i in range(N_SAMPLE_MAPS):
+    im = Image.fromarray(np.round(samples_level[i] * 255).astype(np.uint8))
+    im.save(SAMPLE_MAPS_PATH + str(i).zfill(3) + '-level.jpg')
+    im = Image.fromarray(np.round(samples_texture[i] * 255).astype(np.uint8))
+    im.save(SAMPLE_MAPS_PATH + str(i).zfill(3) + '-texture.jpg')
+
+print('Applying maps...')
 for image in annotation:
         print(image)
-        print(annotation[image])
 
         Path(SAMPLE_CARS_PATH + image.split('.')[0] + '/').mkdir(parents=True, exist_ok=True)
 
